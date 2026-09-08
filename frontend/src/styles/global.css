@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Las fuentes se cargan con <link> en index.html: un @import aqui tendria que
+   ir antes de las directivas @tailwind y retrasaria el primer render. */
+
+@layer base {
+  :root {
+    --sg-neon: #ff0a2e;
+    --sg-glow: #ff3355;
+    --sg-blood: #a30018;
+    --sg-ember: #3d0009;
+    --sg-void: #080003;
+    --sg-panel: rgba(9, 0, 3, 0.74);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-sg-void font-rajdhani text-white antialiased;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* Refuerza el negro del flyer por debajo del shader. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(120% 80% at 50% 0%, rgba(163, 0, 24, 0.18), transparent 60%),
+      var(--sg-void);
+    pointer-events: none;
+  }
+
+  ::selection {
+    background: var(--sg-neon);
+    color: #000;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #12000400;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--sg-blood);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--sg-neon);
+  }
+}
+
+@layer components {
+  /* Panel glassmorphism: traslucido oscuro con borde neon. */
+  .sg-panel {
+    @apply relative rounded-xl border border-sg-neon/70 bg-sg-panel p-8 text-center shadow-neon backdrop-blur-md;
+  }
+
+  .sg-heading {
+    @apply font-orbitron uppercase tracking-[2px];
+    text-shadow:
+      0 0 8px rgba(255, 10, 46, 0.9),
+      0 0 24px rgba(255, 10, 46, 0.35);
+  }
+
+  .sg-btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-full border
+      border-sg-neon bg-transparent px-6 py-2.5 font-orbitron text-sm uppercase
+      text-sg-glow shadow-neon-sm transition-all duration-300
+      hover:bg-sg-neon hover:text-black hover:shadow-neon-lg
+      focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
+      focus-visible:outline-sg-glow
+      disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent
+      disabled:hover:text-sg-glow disabled:hover:shadow-neon-sm;
+  }
+
+  .sg-input {
+    @apply w-full rounded-lg border border-sg-neon/60 bg-black/55 px-3 py-2.5 text-white
+      placeholder:text-white/40 transition-colors
+      focus:border-sg-neon focus:outline-none focus:ring-1 focus:ring-sg-glow;
+  }
+
+  .sg-label {
+    @apply mb-1.5 block font-orbitron text-xs uppercase tracking-wider text-white/70;
+  }
+
+  /* Google Maps en tonos rojo/oscuro: se invierte el mapa claro, se tinta con
+     sepia y se rota el matiz hacia el rojo del flyer. */
+  .sg-map-filter {
+    filter: invert(92%) grayscale(38%) sepia(72%) saturate(700%) hue-rotate(-24deg)
+      brightness(78%) contrast(118%);
+  }
+}
+
+@layer utilities {
+  .sg-neon-text {
+    text-shadow:
+      0 0 8px rgba(255, 10, 46, 0.9),
+      0 0 24px rgba(255, 10, 46, 0.35);
+  }
+}
+
+/* Respeta a quien pide menos movimiento en el sistema operativo. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

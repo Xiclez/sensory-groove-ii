@@ -1,0 +1,153 @@
+### Sensory Groove V2 - API de accesos
+### Compatible con la extension "REST Client" de VS Code y con JetBrains HTTP Client.
+### Ejecuta las peticiones en orden: las variables se encadenan solas.
+
+@baseUrl = http://localhost:8000
+@adminToken = sensory-admin-dev
+
+
+### 0. Health check
+GET {{baseUrl}}/api/health
+
+
+### 1. Subir comprobante (multipart/form-data)
+# Ajusta la ruta del archivo al comprobante que quieras probar.
+# @name crearTransferencia
+POST {{baseUrl}}/api/transfer
+Content-Type: multipart/form-data; boundary=SensoryGrooveBoundary
+
+--SensoryGrooveBoundary
+Content-Disposition: form-data; name="nombre"
+
+Emiliano Vargas
+--SensoryGrooveBoundary
+Content-Disposition: form-data; name="whatsapp"
+
+6142550381
+--SensoryGrooveBoundary
+Content-Disposition: form-data; name="accesos"
+
+2
+--SensoryGrooveBoundary
+Content-Disposition: form-data; name="comprobante"; filename="comprobante.png"
+Content-Type: image/png
+
+< ../refs/WhatsApp Image 2026-08-19 at 12.53.38 PM(1).jpeg
+--SensoryGrooveBoundary--
+
+
+### Captura el id devuelto arriba
+@transferId = {{crearTransferencia.response.body.id}}
+
+
+### 2. Listado de pendientes SIN token -> 401
+GET {{baseUrl}}/api/admin/transfers
+
+
+### 3. Listado de pendientes CON token
+GET {{baseUrl}}/api/admin/transfers
+X-Admin-Token: {{adminToken}}
+
+
+### 4. Revisar el comprobante subido
+GET {{baseUrl}}/api/admin/transfers/{{transferId}}/comprobante
+X-Admin-Token: {{adminToken}}
+
+
+### 5. Escanear ANTES de aprobar -> "Acceso no válido o no aprobado"
+POST {{baseUrl}}/api/scan
+Content-Type: application/json
+
+{
+  "code": "SG-2026-{{transferId}}"
+}
+
+
+### 6. Aprobar la transferencia (imprime el envio simulado de WhatsApp)
+POST {{baseUrl}}/api/admin/resolve
+Content-Type: application/json
+X-Admin-Token: {{adminToken}}
+
+{
+  "id": "{{transferId}}",
+  "action": "approve"
+}
+
+
+### 7. Re-resolver la misma transferencia -> 409
+POST {{baseUrl}}/api/admin/resolve
+Content-Type: application/json
+X-Admin-Token: {{adminToken}}
+
+{
+  "id": "{{transferId}}",
+  "action": "reject"
+}
+
+
+### 8. Descargar el QR generado
+GET {{baseUrl}}/api/admin/transfers/{{transferId}}/qr
+X-Admin-Token: {{adminToken}}
+
+
+### 9. Escanear el acceso aprobado -> "Acceso Válido"
+POST {{baseUrl}}/api/scan
+Content-Type: application/json
+
+{
+  "code": "SG-2026-{{transferId}}"
+}
+
+
+### 10. Re-escanear -> warning "Acceso ya escaneado"
+POST {{baseUrl}}/api/scan
+Content-Type: application/json
+
+{
+  "code": "{{transferId}}"
+}
+
+
+### 11. QR malformado -> "QR Invalido"
+POST {{baseUrl}}/api/scan
+Content-Type: application/json
+
+{
+  "code": "no-soy-un-qr"
+}
+
+
+### 12. Rechazar una transferencia
+# @name crearRechazo
+POST {{baseUrl}}/api/transfer
+Content-Type: multipart/form-data; boundary=SensoryGrooveBoundary
+
+--SensoryGrooveBoundary
+Content-Disposition: form-data; name="nombre"
+
+Prueba Rechazo
+--SensoryGrooveBoundary
+Content-Disposition: form-data; name="whatsapp"
+
+6142854941
+--SensoryGrooveBoundary
+Content-Disposition: form-data; name="accesos"
+
+1
+--SensoryGrooveBoundary
+Content-Disposition: form-data; name="comprobante"; filename="comprobante.png"
+Content-Type: image/png
+
+< ../refs/WhatsApp Image 2026-08-19 at 12.53.38 PM(1).jpeg
+--SensoryGrooveBoundary--
+
+
+###
+POST {{baseUrl}}/api/admin/resolve
+Content-Type: application/json
+X-Admin-Token: {{adminToken}}
+
+{
+  "id": "{{crearRechazo.response.body.id}}",
+  "action": "reject"
+}
