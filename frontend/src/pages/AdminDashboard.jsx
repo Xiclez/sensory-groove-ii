@@ -33,7 +33,7 @@ export default function AdminDashboard() {
     e.preventDefault();
     setLoginError('');
     try {
-      const res = await fetch('http://localhost:8000/api/admin/login', {
+      const res = await fetch(`https://api-sensory-groove2.fadexlabs.com/api/admin/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(credentials)
@@ -59,7 +59,7 @@ export default function AdminDashboard() {
 
   const fetchTransfers = async (authToken) => {
     try {
-      const res = await fetch('http://localhost:8000/api/admin/transfers', {
+      const res = await fetch(`https://api-sensory-groove2.fadexlabs.com/api/admin/transfers`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
       });
       if (res.status === 401) return handleLogout();
@@ -72,7 +72,7 @@ export default function AdminDashboard() {
 
   const handleResolve = async (id, action) => {
     try {
-      await fetch('http://localhost:8000/api/admin/resolve', {
+      await fetch(`https://api-sensory-groove2.fadexlabs.com/api/admin/resolve`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -88,7 +88,7 @@ export default function AdminDashboard() {
 
   const checkWaStatus = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/admin/whatsapp/status', {
+      const res = await fetch(`https://api-sensory-groove2.fadexlabs.com/api/admin/whatsapp/status`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.status === 401) return handleLogout();
@@ -109,7 +109,7 @@ export default function AdminDashboard() {
     setIsLoadingQr(true);
     setWaStatus('Generando QR...');
     try {
-      const res = await fetch('http://localhost:8000/api/admin/whatsapp/start', {
+      const res = await fetch(`https://api-sensory-groove2.fadexlabs.com/api/admin/whatsapp/start`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.status === 401) return handleLogout();
@@ -199,7 +199,7 @@ export default function AdminDashboard() {
                 
                 <div className="flex gap-2">
                   <a 
-                    href={`http://localhost:8000/${t.comprobante_path}`} 
+                    href={`https://api-sensory-groove2.fadexlabs.com/${t.comprobante_path}`} 
                     target="_blank" 
                     rel="noreferrer"
                     className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded font-orbitron transition-colors text-center text-white"

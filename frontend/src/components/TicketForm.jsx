@@ -63,7 +63,7 @@ export default function TicketForm() {
     data.append('comprobante', formData.comprobante);
 
     try {
-      const res = await fetch('http://localhost:8000/api/transfer', {
+      const res = await fetch(`https://api-sensory-groove2.fadexlabs.com/api/transfer`, {
         method: 'POST',
         body: data
       });
