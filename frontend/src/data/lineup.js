@@ -28,13 +28,13 @@ export const LINEUP = [
 ];
 
 export const ASSETS = {
-  logo: 'https://res.cloudinary.com/dn4m0kr7j/image/upload/v1783381927/Sensory_Groove_Logo_d86xuu.jpg',
+  logo: 'https://res.cloudinary.com/dn4m0kr7j/image/upload/v1787165847/SesnoryGrooveII.jpg',
   flyer:
-    'https://res.cloudinary.com/dn4m0kr7j/image/upload/v1783381929/Sensory_Groove_FLyer_b1hqao.jpg',
+    'https://res.cloudinary.com/dn4m0kr7j/image/upload/v1788918460/TXT_02_SENSORY_GROOVE_2_ZULU_copia.jpg_zuptmv.jpg',
   vj: 'https://res.cloudinary.com/dn4m0kr7j/image/upload/v1783399036/726758198_18089995856373739_2442213852342601636_n_rji9wb.jpg',
   fadex: 'https://res.cloudinary.com/dn4m0kr7j/image/upload/v1776805190/FADEX_nt7bkp.png',
   mapa: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3501.8681946791935!2d-106.07659762449919!3d28.633712175664144!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x86ea4352dabd3c4f%3A0x90db45533ca8c0f6!2sZulu!5e0!3m2!1sen!2smx!4v1783381634564!5m2!1sen!2smx',
 };
 
 // Fecha del evento para la cuenta regresiva (18 Julio 2026, 21:00 hrs).
-export const EVENT_DATE = '2026-07-18T21:00:00';
+export const EVENT_DATE = '2026-10-03T21:00:00';

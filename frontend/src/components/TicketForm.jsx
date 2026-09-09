@@ -1,215 +1,127 @@
-import { useRef, useState } from 'react';
-import { createTransfer } from '../lib/api';
-
-const PRECIO_PREVENTA = 100;
-const MAX_ACCESOS = 20;
-const MAX_MB = 8;
-const TIPOS_ACEPTADOS = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'application/pdf',
-];
-
-const ESTADO_INICIAL = {
-  nombre: '',
-  whatsapp: '',
-  accesos: 1,
-  comprobante: null,
-};
+import { useState } from 'react';
 
 export default function TicketForm() {
-  const [form, setForm] = useState(ESTADO_INICIAL);
-  const [errores, setErrores] = useState({});
-  const [enviando, setEnviando] = useState(false);
-  const [resultado, setResultado] = useState(null); // { ok, mensaje }
-  const fileInputRef = useRef(null);
+  const [formData, setFormData] = useState({ nombre: '', whatsapp: '', accesos: 1, comprobante: null });
+  const [status, setStatus] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fileName, setFileName] = useState("Sin archivo seleccionado");
 
-  const actualizar = (campo, valor) => {
-    setForm((prev) => ({ ...prev, [campo]: valor }));
-    setErrores((prev) => ({ ...prev, [campo]: undefined }));
+  const handlePhoneChange = (e) => {
+    const numbersOnly = e.target.value.replace(/\D/g, '').slice(0, 10);
+    setFormData({ ...formData, whatsapp: numbersOnly });
   };
 
-  const validar = () => {
-    const nuevos = {};
-    const digitos = form.whatsapp.replace(/\D/g, '');
-
-    if (form.nombre.trim().length < 2) {
-      nuevos.nombre = 'Escribe el nombre completo de quien compra.';
-    }
-    if (digitos.length < 10 || digitos.length > 13) {
-      nuevos.whatsapp = 'Debe tener 10 dígitos (sin espacios ni guiones).';
-    }
-    const accesos = Number(form.accesos);
-    if (!Number.isInteger(accesos) || accesos < 1 || accesos > MAX_ACCESOS) {
-      nuevos.accesos = `Elige entre 1 y ${MAX_ACCESOS} accesos.`;
-    }
-    if (!form.comprobante) {
-      nuevos.comprobante = 'Adjunta la foto o PDF de tu comprobante.';
-    } else if (!TIPOS_ACEPTADOS.includes(form.comprobante.type)) {
-      nuevos.comprobante = 'Formato no válido. Usa JPG, PNG, WEBP o PDF.';
-    } else if (form.comprobante.size > MAX_MB * 1024 * 1024) {
-      nuevos.comprobante = `El archivo pesa más de ${MAX_MB} MB.`;
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+      setFileName("Sin archivo seleccionado");
+      setFormData({ ...formData, comprobante: null });
+      return;
     }
 
-    setErrores(nuevos);
-    return Object.keys(nuevos).length === 0;
+    const validTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+    if (!validTypes.includes(file.type)) {
+      setStatus('Error: Formato no permitido. Solo PDF, JPG, JPEG o PNG.');
+      e.target.value = '';
+      setFileName("Sin archivo seleccionado");
+      setFormData({ ...formData, comprobante: null });
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setStatus('Error: El archivo supera el límite de 2MB.');
+      e.target.value = '';
+      setFileName("Sin archivo seleccionado");
+      setFormData({ ...formData, comprobante: null });
+      return;
+    }
+
+    setStatus('');
+    setFileName(file.name);
+    setFormData({ ...formData, comprobante: file });
   };
 
-  const onSubmit = async (event) => {
-    event.preventDefault();
-    setResultado(null);
-    if (!validar()) return;
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (formData.whatsapp.length !== 10) {
+      setStatus('El número de WhatsApp debe tener exactamente 10 dígitos.');
+      return;
+    }
+    if (!formData.comprobante) {
+      setStatus('Por favor, selecciona un archivo válido.');
+      return;
+    }
 
-    setEnviando(true);
+    setIsSubmitting(true);
+    setStatus('Subiendo comprobante...');
+    
+    const data = new FormData();
+    data.append('nombre', formData.nombre);
+    data.append('whatsapp', formData.whatsapp);
+    data.append('accesos', formData.accesos);
+    data.append('comprobante', formData.comprobante);
+
     try {
-      await createTransfer({
-        nombre: form.nombre.trim(),
-        whatsapp: form.whatsapp.replace(/\D/g, ''),
-        accesos: Number(form.accesos),
-        comprobante: form.comprobante,
+      const res = await fetch('http://localhost:8000/api/transfer', {
+        method: 'POST',
+        body: data
       });
-      setResultado({
-        ok: true,
-        mensaje:
-          '¡Comprobante recibido! Estamos validando tu pago y te enviamos tus accesos por WhatsApp.',
-      });
-      setForm(ESTADO_INICIAL);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    } catch (error) {
-      setResultado({
-        ok: false,
-        mensaje:
-          error?.message ||
-          'No pudimos enviar tu comprobante. Revisa tu conexión e intenta de nuevo.',
-      });
+      if(res.ok) {
+          setStatus('¡Comprobante enviado exitosamente! Lo validaremos a la brevedad.');
+          setFormData({ nombre: '', whatsapp: '', accesos: 1, comprobante: null });
+          setFileName("Sin archivo seleccionado");
+          e.target.reset();
+      } else {
+          setStatus('Error al enviar. Intenta de nuevo.');
+      }
+    } catch (err) {
+      setStatus('Error de conexión. Intenta de nuevo.');
     } finally {
-      setEnviando(false);
+      setIsSubmitting(false);
     }
   };
-
-  const total = Number(form.accesos) > 0 ? Number(form.accesos) * PRECIO_PREVENTA : 0;
 
   return (
-    <form
-      onSubmit={onSubmit}
-      noValidate
-      className="rounded-xl border border-sg-neon/70 bg-black/45 p-6 text-left shadow-neon-sm"
-    >
-      <h3 className="sg-heading mb-5 text-xl text-sg-glow">Registro de Acceso</h3>
-
-      <div className="flex flex-col gap-4">
-        <div>
-          <label htmlFor="tf-nombre" className="sg-label">
-            Nombre de quien compra
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <input type="text" placeholder="Nombre de quien compra" required 
+        className="bg-black/50 border border-cyber-red p-3 rounded text-white outline-none focus:shadow-[0_0_10px_rgba(255,0,60,0.5)] transition-shadow"
+        value={formData.nombre}
+        onChange={e => setFormData({...formData, nombre: e.target.value})} />
+      
+      <input type="tel" placeholder="Número de WhatsApp (10 dígitos)" required 
+        pattern="[0-9]{10}"
+        minLength="10"
+        maxLength="10"
+        title="Ingresa exactamente 10 dígitos numéricos"
+        className="bg-black/50 border border-cyber-red p-3 rounded text-white outline-none focus:shadow-[0_0_10px_rgba(255,0,60,0.5)] transition-shadow"
+        value={formData.whatsapp}
+        onChange={handlePhoneChange} />
+      
+      <input type="number" min="1" placeholder="Cantidad de accesos" required 
+        className="bg-black/50 border border-cyber-red p-3 rounded text-white outline-none focus:shadow-[0_0_10px_rgba(255,0,60,0.5)] transition-shadow"
+        value={formData.accesos}
+        onChange={e => setFormData({...formData, accesos: e.target.value})} />
+      
+      <div className="text-left mt-2">
+          <label className="text-sm text-gray-300 block mb-2 font-orbitron">Sube tu comprobante de pago (Máx 2MB. PDF, JPG, PNG)</label>
+          <label className="relative w-full border border-cyber-red bg-black/50 rounded flex items-center overflow-hidden cursor-pointer group hover:border-white transition-colors">
+            <input type="file" accept=".pdf, .jpg, .jpeg, .png" required 
+              className="hidden"
+              onChange={handleFileChange} />
+            <div className="bg-cyber-red text-white font-orbitron px-4 py-3 text-sm font-bold whitespace-nowrap group-hover:bg-white group-hover:text-black transition-colors">
+              SUBIR ARCHIVO
+            </div>
+            <div className="px-4 text-sm truncate text-gray-300 w-full group-hover:text-white transition-colors">
+              {fileName}
+            </div>
           </label>
-          <input
-            id="tf-nombre"
-            name="nombre"
-            type="text"
-            autoComplete="name"
-            className="sg-input"
-            placeholder="Nombre y apellido"
-            value={form.nombre}
-            onChange={(e) => actualizar('nombre', e.target.value)}
-            aria-invalid={Boolean(errores.nombre)}
-          />
-          <FieldError mensaje={errores.nombre} />
-        </div>
-
-        <div>
-          <label htmlFor="tf-whatsapp" className="sg-label">
-            WhatsApp
-          </label>
-          <input
-            id="tf-whatsapp"
-            name="whatsapp"
-            type="tel"
-            inputMode="numeric"
-            autoComplete="tel"
-            className="sg-input"
-            placeholder="6141234567"
-            value={form.whatsapp}
-            onChange={(e) => actualizar('whatsapp', e.target.value)}
-            aria-invalid={Boolean(errores.whatsapp)}
-          />
-          <FieldError mensaje={errores.whatsapp} />
-        </div>
-
-        <div>
-          <label htmlFor="tf-accesos" className="sg-label">
-            Cantidad de accesos
-          </label>
-          <input
-            id="tf-accesos"
-            name="accesos"
-            type="number"
-            min="1"
-            max={MAX_ACCESOS}
-            step="1"
-            className="sg-input"
-            value={form.accesos}
-            onChange={(e) => actualizar('accesos', e.target.value)}
-            aria-invalid={Boolean(errores.accesos)}
-          />
-          <FieldError mensaje={errores.accesos} />
-          {total > 0 && !errores.accesos && (
-            <p className="mt-1.5 font-orbitron text-xs text-white/60">
-              Total en preventa: ${total}
-            </p>
-          )}
-        </div>
-
-        <div>
-          <label htmlFor="tf-comprobante" className="sg-label">
-            Comprobante de depósito y/o transferencia
-          </label>
-          <input
-            id="tf-comprobante"
-            name="comprobante"
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,application/pdf"
-            className="w-full cursor-pointer rounded-lg border border-sg-neon/60 bg-black/55
-              text-sm text-white/80 file:mr-3 file:cursor-pointer file:border-0
-              file:bg-sg-neon/15 file:px-4 file:py-2.5 file:font-orbitron
-              file:text-xs file:uppercase file:text-sg-glow
-              hover:file:bg-sg-neon/25"
-            onChange={(e) => actualizar('comprobante', e.target.files?.[0] ?? null)}
-            aria-invalid={Boolean(errores.comprobante)}
-          />
-          <FieldError mensaje={errores.comprobante} />
-          {form.comprobante && !errores.comprobante && (
-            <p className="mt-1.5 truncate text-xs text-white/50">
-              {form.comprobante.name}
-            </p>
-          )}
-        </div>
-
-        <button type="submit" className="sg-btn mt-2 w-full" disabled={enviando}>
-          {enviando ? 'Enviando...' : 'Enviar para validación'}
-        </button>
-
-        {resultado && (
-          <p
-            role="status"
-            aria-live="polite"
-            className={`rounded-lg border p-3 text-sm ${
-              resultado.ok
-                ? 'border-emerald-500/70 bg-emerald-500/10 text-emerald-300'
-                : 'border-sg-neon bg-sg-neon/10 text-sg-glow'
-            }`}
-          >
-            {resultado.mensaje}
-          </p>
-        )}
       </div>
+
+      <button type="submit" disabled={isSubmitting} className="mt-4 font-orbitron bg-black/50 border border-cyber-red text-white py-3 px-4 rounded-full hover:bg-cyber-red hover:text-white transition-all shadow-[0_0_10px_rgba(255,0,60,0.2)] disabled:opacity-50 disabled:cursor-not-allowed">
+        {isSubmitting ? 'PROCESANDO...' : 'ENVIAR COMPROBANTE'}
+      </button>
+      {status && <p className="text-cyber-red mt-2 font-bold">{status}</p>}
     </form>
   );
-}
-
-function FieldError({ mensaje }) {
-  if (!mensaje) return null;
-  return <p className="mt-1.5 text-xs text-sg-glow">{mensaje}</p>;
 }

@@ -1,275 +1,223 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import QrScanner from '../components/QrScanner';
-import {
-  clearAdminToken,
-  fetchComprobanteUrl,
-  getAdminToken,
-  listPendingTransfers,
-  resolveTransfer,
-  setAdminToken,
-} from '../lib/api';
+import { useState, useEffect } from 'react';
 
 export default function AdminDashboard() {
-  const [autenticado, setAutenticado] = useState(Boolean(getAdminToken()));
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [credentials, setCredentials] = useState({ username: '', password: '' });
+  const [loginError, setLoginError] = useState('');
+  const [token, setToken] = useState(localStorage.getItem('sgAdminToken') || '');
 
-  if (!autenticado) {
-    return <LoginGate onListo={() => setAutenticado(true)} />;
+  const [transfers, setTransfers] = useState([]);
+  const [qrCode, setQrCode] = useState(null);
+  const [waStatus, setWaStatus] = useState('Verificando estado...');
+  const [isLoadingQr, setIsLoadingQr] = useState(false);
+
+  useEffect(() => {
+    if (token) {
+      setIsAuthenticated(true);
+      fetchTransfers(token);
+      checkWaStatus();
+    }
+  }, [token]);
+
+  useEffect(() => {
+    let interval;
+    if (isAuthenticated && qrCode) {
+      interval = setInterval(() => {
+        checkWaStatus();
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [isAuthenticated, qrCode]);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    try {
+      const res = await fetch('http://localhost:8000/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(credentials)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('sgAdminToken', data.token);
+        setToken(data.token);
+        setIsAuthenticated(true);
+      } else {
+        setLoginError('Credenciales incorrectas');
+      }
+    } catch (err) {
+      setLoginError('Error conectando al servidor');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('sgAdminToken');
+    setToken('');
+    setIsAuthenticated(false);
+  };
+
+  const fetchTransfers = async (authToken) => {
+    try {
+      const res = await fetch('http://localhost:8000/api/admin/transfers', {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      if (res.status === 401) return handleLogout();
+      const data = await res.json();
+      setTransfers(data);
+    } catch (error) {
+      console.error("Error fetching transfers:", error);
+    }
+  };
+
+  const handleResolve = async (id, action) => {
+    try {
+      await fetch('http://localhost:8000/api/admin/resolve', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({id, action})
+      });
+      fetchTransfers(token); 
+    } catch (error) {
+      console.error("Error resolving transfer:", error);
+    }
+  };
+
+  const checkWaStatus = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/admin/whatsapp/status', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.status === 401) return handleLogout();
+      const data = await res.json();
+      
+      if (data.status === 'CONNECTED') {
+        setWaStatus('¡WhatsApp ya está conectado y listo!');
+        setQrCode(null);
+      } else if (!qrCode) {
+        setWaStatus('Desconectado');
+      }
+    } catch (error) {
+      if(!qrCode) setWaStatus('Error verificando conexión');
+    }
+  };
+
+  const startWhatsAppSession = async () => {
+    setIsLoadingQr(true);
+    setWaStatus('Generando QR...');
+    try {
+      const res = await fetch('http://localhost:8000/api/admin/whatsapp/start', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.status === 401) return handleLogout();
+      const data = await res.json();
+      
+      if (data.qrcode) {
+        const qrImageSrc = data.qrcode.startsWith('data:image') 
+          ? data.qrcode 
+          : `data:image/png;base64,${data.qrcode}`;
+        setQrCode(qrImageSrc);
+        setWaStatus('Escanea el QR con tu WhatsApp...');
+      } else if (data.status === 'CONNECTED') {
+        setWaStatus('¡WhatsApp ya está conectado y listo!');
+        setQrCode(null);
+      } else {
+        setWaStatus(data.message || 'Error al iniciar sesión');
+      }
+    } catch (error) {
+      setWaStatus('Error de conexión con el servidor');
+    } finally {
+      setIsLoadingQr(false);
+    }
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-4 relative z-10">
+        <form onSubmit={handleLogin} className="bg-black/60 border border-cyber-red p-8 rounded-xl backdrop-blur-md shadow-[0_0_20px_rgba(255,0,60,0.3)] w-full max-w-sm text-center flex flex-col gap-5">
+          <img src="https://res.cloudinary.com/dn4m0kr7j/image/upload/v1783381927/Sensory_Groove_Logo_d86xuu.jpg" alt="Logo" className="w-24 h-24 mx-auto rounded-full border-2 border-cyber-red shadow-[0_0_15px_rgba(255,0,60,0.5)] object-cover mb-2" />
+          <h2 className="font-orbitron text-2xl text-cyber-red uppercase tracking-widest">Admin Login</h2>
+          
+          <input type="text" placeholder="Usuario" required 
+            className="bg-black/50 border border-cyber-red p-3 rounded text-white outline-none focus:shadow-[0_0_10px_rgba(255,0,60,0.5)] text-center"
+            onChange={e => setCredentials({...credentials, username: e.target.value})} />
+            
+          <input type="password" placeholder="Contraseña" required 
+            className="bg-black/50 border border-cyber-red p-3 rounded text-white outline-none focus:shadow-[0_0_10px_rgba(255,0,60,0.5)] text-center"
+            onChange={e => setCredentials({...credentials, password: e.target.value})} />
+            
+          <button type="submit" className="font-orbitron bg-transparent border border-cyber-red text-cyber-red py-3 px-4 rounded-full hover:bg-cyber-red hover:text-black transition-all shadow-[0_0_10px_rgba(255,0,60,0.2)] mt-2">
+            INGRESAR
+          </button>
+          
+          {loginError && <p className="text-cyber-red font-bold mt-2">{loginError}</p>}
+        </form>
+      </div>
+    );
   }
 
   return (
-    <Panel
-      onSalir={() => {
-        clearAdminToken();
-        setAutenticado(false);
-      }}
-    />
-  );
-}
-
-function LoginGate({ onListo }) {
-  const [token, setToken] = useState('');
-
-  const onSubmit = (event) => {
-    event.preventDefault();
-    if (!token.trim()) return;
-    setAdminToken(token.trim());
-    onListo();
-  };
-
-  return (
-    <main className="relative mx-auto flex min-h-screen max-w-md items-center px-5">
-      <form onSubmit={onSubmit} className="sg-panel w-full text-left">
-        <h1 className="sg-heading mb-6 text-center text-2xl text-sg-glow">
-          Acceso Staff
-        </h1>
-        <label htmlFor="admin-token" className="sg-label">
-          Token de administrador
-        </label>
-        <input
-          id="admin-token"
-          type="password"
-          autoComplete="current-password"
-          className="sg-input"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-        />
-        <button type="submit" className="sg-btn mt-5 w-full">
-          Entrar
-        </button>
-        <Link
-          to="/"
-          className="mt-5 block text-center text-xs uppercase tracking-wider text-white/50 hover:text-white"
-        >
-          Volver al flyer
-        </Link>
-      </form>
-    </main>
-  );
-}
-
-function Panel({ onSalir }) {
-  const [transfers, setTransfers] = useState([]);
-  const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState(null);
-  const [resolviendo, setResolviendo] = useState(null);
-  const [comprobante, setComprobante] = useState(null); // { url, tipo, nombre }
-
-  const cargar = useCallback(async () => {
-    setError(null);
-    try {
-      setTransfers(await listPendingTransfers());
-    } catch (err) {
-      if (err?.status === 401) {
-        setError('Token inválido o expirado. Vuelve a iniciar sesión.');
-      } else {
-        setError(err?.message || 'No se pudo cargar la lista.');
-      }
-    } finally {
-      setCargando(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    cargar();
-    // Refresco periodico: varias personas suben comprobantes en paralelo.
-    const id = setInterval(cargar, 20000);
-    return () => clearInterval(id);
-  }, [cargar]);
-
-  const onResolver = async (id, action) => {
-    setResolviendo(id);
-    setError(null);
-    try {
-      await resolveTransfer(id, action);
-      // Optimista: lo sacamos de la cola sin esperar el siguiente refresco.
-      setTransfers((prev) => prev.filter((t) => t.id !== id));
-    } catch (err) {
-      setError(err?.message || 'No se pudo resolver la transferencia.');
-      cargar();
-    } finally {
-      setResolviendo(null);
-    }
-  };
-
-  const onVerComprobante = async (transfer) => {
-    setError(null);
-    try {
-      const url = await fetchComprobanteUrl(transfer.id);
-      const tipo = transfer.comprobante_path.endsWith('.pdf') ? 'pdf' : 'imagen';
-      setComprobante({ url, tipo, nombre: transfer.nombre });
-    } catch (err) {
-      setError(err?.message || 'No se pudo abrir el comprobante.');
-    }
-  };
-
-  const cerrarComprobante = () => {
-    if (comprobante) URL.revokeObjectURL(comprobante.url);
-    setComprobante(null);
-  };
-
-  const totalAccesos = transfers.reduce((sum, t) => sum + t.accesos, 0);
-
-  return (
-    <main className="relative mx-auto max-w-6xl px-4 py-10">
-      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="sg-heading text-3xl text-sg-glow md:text-4xl">
-            Panel Administrativo
-          </h1>
-          <p className="mt-1 font-orbitron text-xs uppercase tracking-wider text-white/50">
-            Sensory Groove · Control de accesos
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link to="/" className="sg-btn text-xs">
-            Flyer
-          </Link>
-          <button type="button" className="sg-btn text-xs" onClick={onSalir}>
-            Salir
+    <div className="max-w-6xl mx-auto p-4 py-10 relative z-10 grid grid-cols-1 lg:grid-cols-3 gap-8">
+      
+      <div className="lg:col-span-1">
+        <h1 className="text-4xl font-orbitron text-cyber-red neon-text mb-8">Admin Panel</h1>
+        <div className="bg-cyber-panel neon-border p-6 rounded-xl text-center">
+          <h2 className="font-orbitron text-xl mb-4">Estado de WhatsApp</h2>
+          <p className={`mb-4 font-bold ${waStatus.includes('conectado') ? 'text-green-500' : 'text-cyber-red'}`}>{waStatus}</p>
+          {qrCode && (
+            <div className="bg-white p-2 rounded-lg inline-block mb-4 border-2 border-cyber-red">
+              <img src={qrCode} alt="WhatsApp QR Code" className="w-48 h-48" />
+            </div>
+          )}
+          <button onClick={startWhatsAppSession} disabled={isLoadingQr} className="w-full font-orbitron bg-transparent border border-cyber-red text-cyber-red py-2 px-4 rounded hover:bg-cyber-red hover:text-black transition-all shadow-[0_0_10px_rgba(255,0,60,0.2)] disabled:opacity-50 mb-4">
+            {isLoadingQr ? 'CARGANDO...' : 'VINCULAR WHATSAPP'}
+          </button>
+          <button onClick={handleLogout} className="w-full font-orbitron bg-black/50 border border-gray-600 text-gray-400 py-2 px-4 rounded hover:bg-gray-800 transition-all text-sm">
+            CERRAR SESIÓN
           </button>
         </div>
-      </header>
-
-      {error && (
-        <p
-          role="alert"
-          className="mb-6 rounded-lg border border-sg-neon bg-sg-neon/10 p-3 text-sm text-sg-glow"
-        >
-          {error}
-        </p>
-      )}
-
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-        {/* --- Cola de validacion --- */}
-        <section className="sg-panel text-left">
-          <div className="mb-6 flex items-baseline justify-between gap-3">
-            <h2 className="sg-heading text-xl">Pendientes de Validación</h2>
-            <span className="font-orbitron text-xs text-white/50">
-              {transfers.length} · {totalAccesos} accesos
-            </span>
-          </div>
-
-          {cargando ? (
-            <p className="text-sm text-white/50">Cargando...</p>
-          ) : transfers.length === 0 ? (
-            <p className="text-sm text-white/50">
-              No hay transferencias pendientes.
-            </p>
-          ) : (
-            <ul className="space-y-4">
-              {transfers.map((t) => (
-                <li
-                  key={t.id}
-                  className="rounded-lg border border-sg-neon/60 bg-black/60 p-4"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="truncate text-lg font-bold">{t.nombre}</p>
-                      <p className="text-sm text-white/60">
-                        WA: {t.whatsapp} · Accesos: {t.accesos}
-                      </p>
-                      <p className="mt-1 font-mono text-[11px] text-white/35">
-                        {t.id}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 flex-col gap-2">
-                      <button
-                        type="button"
-                        className="rounded border border-white/25 px-4 py-1 font-orbitron text-xs uppercase text-white/70 transition-colors hover:border-white hover:text-white"
-                        onClick={() => onVerComprobante(t)}
-                      >
-                        Comprobante
-                      </button>
-                      <button
-                        type="button"
-                        disabled={resolviendo === t.id}
-                        className="rounded border border-emerald-500 bg-emerald-500/15 px-4 py-1 font-orbitron text-xs uppercase text-emerald-300 transition-colors hover:bg-emerald-500 hover:text-black disabled:opacity-50"
-                        onClick={() => onResolver(t.id, 'approve')}
-                      >
-                        Aprobar
-                      </button>
-                      <button
-                        type="button"
-                        disabled={resolviendo === t.id}
-                        className="rounded border border-sg-neon bg-sg-neon/15 px-4 py-1 font-orbitron text-xs uppercase text-sg-glow transition-colors hover:bg-sg-neon hover:text-black disabled:opacity-50"
-                        onClick={() => onResolver(t.id, 'reject')}
-                      >
-                        Rechazar
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* --- Escaner de puerta --- */}
-        <section className="sg-panel text-left">
-          <h2 className="sg-heading mb-6 text-xl">Escáner de Accesos</h2>
-          <QrScanner />
-        </section>
       </div>
 
-      {comprobante && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
-          onClick={cerrarComprobante}
-        >
-          <div
-            className="animate-fade-in relative max-h-full w-full max-w-2xl overflow-auto rounded-xl border border-sg-neon bg-sg-void p-4 shadow-neon-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center justify-between gap-4">
-              <h3 className="sg-heading truncate text-base">
-                {comprobante.nombre}
-              </h3>
-              <button
-                type="button"
-                aria-label="Cerrar"
-                className="text-2xl leading-none text-sg-glow hover:text-white"
-                onClick={cerrarComprobante}
-              >
-                &times;
-              </button>
-            </div>
-            {comprobante.tipo === 'pdf' ? (
-              <iframe
-                src={comprobante.url}
-                title="Comprobante"
-                className="h-[70vh] w-full rounded border border-sg-neon/40 bg-white"
-              />
-            ) : (
-              <img
-                src={comprobante.url}
-                alt="Comprobante de pago"
-                className="mx-auto max-h-[70vh] rounded border border-sg-neon/40"
-              />
-            )}
+      <div className="lg:col-span-2">
+        <div className="bg-cyber-panel neon-border p-6 rounded-xl mt-[4.5rem]">
+          <h2 className="font-orbitron text-2xl mb-6">Control de Transferencias</h2>
+          <div className="space-y-4">
+            {transfers.map(t => (
+              <div key={t.id} className={`bg-black/80 border p-4 rounded-lg flex flex-col md:flex-row justify-between items-center gap-4 ${t.status === 'pending' ? 'border-cyber-red' : t.status === 'approved' ? 'border-green-500' : 'border-gray-500'}`}>
+                <div className="flex-1">
+                  <p className="font-bold text-xl mb-1">
+                    {t.nombre} 
+                    <span className={`text-xs uppercase ml-3 px-2 py-1 rounded font-orbitron ${t.status === 'pending' ? 'bg-cyber-red text-black' : t.status === 'approved' ? 'bg-green-500 text-black' : 'bg-gray-500 text-white'}`}>
+                      {t.status}
+                    </span>
+                  </p>
+                  <p className="text-sm text-gray-300">WA: {t.whatsapp} | Accesos: {t.accesos}</p>
+                </div>
+                
+                <div className="flex gap-2">
+                  <a 
+                    href={`http://localhost:8000/${t.comprobante_path}`} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded font-orbitron transition-colors text-center text-white"
+                  >
+                    Ver Comprobante
+                  </a>
+                  {t.status === 'pending' && (
+                    <button onClick={() => handleResolve(t.id, 'approved')} className="bg-green-700 hover:bg-green-600 px-4 py-2 rounded font-orbitron transition-colors text-white">
+                      Aprobar
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {transfers.length === 0 && <p className="text-gray-400">No hay transferencias en el sistema.</p>}
           </div>
         </div>
-      )}
-    </main>
+      </div>
+    </div>
   );
 }
