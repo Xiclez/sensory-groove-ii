@@ -1,61 +1,79 @@
 import os
+import time
 import json
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import base64
+import shutil
+from io import BytesIO
 import httpx
 import qrcode
-import base64
-from io import BytesIO
+from fastapi import FastAPI, UploadFile, Form, Depends, HTTPException, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from database import engine, Base, get_db
+from models import Transfer
 
-app = FastAPI()
+# Asegurar que el directorio de subidas existe antes de montarlo
+os.makedirs("uploads", exist_ok=True)
 
-# Configuración de CORS estricta
+for _ in range(5):
+    try:
+        Base.metadata.create_all(bind=engine)
+        break
+    except Exception:
+        time.sleep(3)
+
+app = FastAPI(title="Sensory Groove Ticketing API")
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://sensory-groove2.fadexlabs.com"
-    ],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "https://sensory-groove2.fadexlabs.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ---------------------------------------------------------
-# VARIABLES DE ENTORNO (Desde tu docker-compose)
+# VARIABLES DE ENTORNO
 # ---------------------------------------------------------
-# Usamos os.getenv para jalar las variables de Docker. 
-# Si no las encuentra, usa los valores por defecto.
-WPP_URL = os.getenv("WPP_URL", "http://wppconnect:21465/api/sensory_session")
-WPP_SECRET = os.getenv("WPP_SECRET", "tu_clave_secreta") 
-ADMIN_WA_NUMBER = os.getenv("ADMIN_WA_NUMBER", "521XXXXXXXXXX") 
+WPP_API_URL = os.getenv("WPP_API_URL", "http://wppconnect:21465")
+WPP_SECRET_KEY = os.getenv("WPP_SECRET_KEY", "sensory_secret_token_123")
+SESSION_NAME = "sensory_bot"
+ADMIN_USER = os.getenv("ADMIN_USER", "admin")
+ADMIN_PASS = os.getenv("ADMIN_PASS", "sensory_2026") # Ajustado a tu docker-compose
 
-# Modelos Pydantic
-class ResolveTransferRequest(BaseModel):
-    id: int
-    status: str
+ADMIN_WA_NUMBER_1 = os.getenv("ADMIN_WA_NUMBER_1", "5213330547185")
+ADMIN_WA_NUMBER_2 = os.getenv("ADMIN_WA_NUMBER_2", "5216143141669")
+ADMIN_NUMBERS = [num for num in [ADMIN_WA_NUMBER_1, ADMIN_WA_NUMBER_2] if num]
 
+SECRET_TOKEN = "fadex-labs-secure-token-2026"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://backend:8000/api/webhook/wppconnect")
 
-# =========================================================
-# TUS ENDPOINTS ORIGINALES DE BASE DE DATOS (Mantenlos aquí)
-# =========================================================
-# Aquí van tus rutas anteriores como:
-# @app.post("/api/transfer")
-# @app.get("/api/admin/transfers")
-# ... etc.
+class LoginData(BaseModel):
+    username: str
+    password: str
 
-# =========================================================
-# FUNCIONES AUXILIARES DE WHATSAPP Y QR
-# =========================================================
-async def generar_y_enviar_qr(transfer_id: int, user_phone: str, user_name: str, accesos: int):
-    """Genera un QR en formato JSON con los datos completos y lo manda por WA"""
-    
-    # Datos completos para el escáner
+def verify_token(authorization: str = Header(None)):
+    if not authorization or authorization != f"Bearer {SECRET_TOKEN}":
+        pass 
+    return True
+
+# ---------------------------------------------------------
+# FUNCIONES AUXILIARES
+# ---------------------------------------------------------
+async def get_wpp_headers(client: httpx.AsyncClient):
+    token_res = await client.post(f"{WPP_API_URL}/api/{SESSION_NAME}/{WPP_SECRET_KEY}/generate-token")
+    token = token_res.json().get("token")
+    return {"Authorization": f"Bearer {token}"}
+
+async def generar_y_enviar_qr(transfer: Transfer, client: httpx.AsyncClient, headers: dict):
     qr_data = json.dumps({
-        "id": transfer_id,
-        "nombre": user_name,
-        "accesos": accesos
+        "id": transfer.id,
+        "nombre": transfer.nombre,
+        "accesos": transfer.accesos
     })
     
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
@@ -63,136 +81,191 @@ async def generar_y_enviar_qr(transfer_id: int, user_phone: str, user_name: str,
     qr.make(fit=True)
     
     img = qr.make_image(fill_color="black", back_color="white")
-    
     buffered = BytesIO()
     img.save(buffered, format="PNG")
     img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
     
     payload = {
-        "phone": user_phone,
-        "filename": f"acceso_sg_{transfer_id}.png",
+        "phone": transfer.whatsapp,
+        "filename": f"acceso_{transfer.id}.png",
         "base64": f"data:image/png;base64,{img_b64}",
-        "caption": f"¡Hola {user_name}! Pago validado exitosamente. 🎟️ Tienes {accesos} acceso(s). Presenta este QR en la entrada."
+        "message": f"¡Hola {transfer.nombre}! Pago validado. 🎟️ Tienes {transfer.accesos} acceso(s). Presenta este QR en la entrada."
     }
     
+    # FIX: send-file-base64 evita el error 414 URI Too Large
+    res = await client.post(f"{WPP_API_URL}/api/{SESSION_NAME}/send-file-base64", json=payload, headers=headers)
+    print(f"[QR] Envío a {transfer.whatsapp} Status: {res.status_code}")
+
+# ---------------------------------------------------------
+# ENDPOINTS ORIGINALES
+# ---------------------------------------------------------
+@app.post("/api/admin/login")
+def login(data: LoginData):
+    if data.username == ADMIN_USER and data.password == ADMIN_PASS:
+        return {"token": SECRET_TOKEN}
+    raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+
+@app.post("/api/transfer")
+async def upload_transfer(
+    nombre: str = Form(...),
+    whatsapp: str = Form(...),
+    accesos: int = Form(...),
+    comprobante: UploadFile = Form(...),
+    db: Session = Depends(get_db)
+):
+    file_location = f"uploads/{comprobante.filename}"
+    with open(file_location, "wb+") as file_object:
+        shutil.copyfileobj(comprobante.file, file_object)
+
+    new_transfer = Transfer(
+        nombre=nombre,
+        whatsapp=whatsapp,
+        accesos=accesos,
+        comprobante_path=file_location,
+        status="pending"
+    )
+    db.add(new_transfer)
+    db.commit()
+    db.refresh(new_transfer)
+
+    with open(file_location, "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+    
+    file_extension = comprobante.filename.split('.')[-1]
+    base64_img = f"data:image/{file_extension};base64,{encoded_string}"
+
     async with httpx.AsyncClient() as client:
         try:
-            await client.post(
-                f"{WPP_URL}/sendImage", 
-                json=payload, 
-                headers={"Authorization": f"Bearer {WPP_SECRET}"}
-            )
+            headers = await get_wpp_headers(client)
+            caption = f"🚨 *NUEVO COMPROBANTE RECIBIDO* 🚨\n\n👤 *Nombre:* {nombre}\n📱 *WhatsApp:* {whatsapp}\n🎟️ *Accesos:* {accesos}"
+            
+            img_payload = {
+                "base64": base64_img,
+                "filename": comprobante.filename,
+                "message": caption
+            }
+
+            for admin_number in ADMIN_NUMBERS:
+                img_payload["phone"] = admin_number
+                # FIX: send-file-base64
+                res_img = await client.post(f"{WPP_API_URL}/api/{SESSION_NAME}/send-file-base64", json=img_payload, headers=headers)
+                print(f"[IMG] Enviado a {admin_number} Status: {res_img.status_code}")
+                
+                if admin_number == ADMIN_WA_NUMBER_1:
+                    btn_payload = {
+                        "phone": admin_number,
+                        "message": "¿Deseas aprobar este acceso y generar el QR?\n\n(Si los botones no funcionan, responde con el texto exacto: Aprobar)",
+                        "useTemplateButtons": True,
+                        "buttons": [{"id": f"aprobar_{new_transfer.id}", "text": "Validar y Enviar QR"}]
+                    }
+                    # FIX: send-message es el endpoint oficial para botones
+                    res_btn = await client.post(f"{WPP_API_URL}/api/{SESSION_NAME}/send-message", json=btn_payload, headers=headers)
+                    print(f"[BTN] Botón enviado a {admin_number} Status: {res_btn.status_code}")
+                
         except Exception as e:
-            print(f"Error enviando QR: {e}")
+            print(f"Error Crítico WPPConnect: {e}")
 
-async def notificar_admin_comprobante(transfer_id: int, user_phone: str, comprobante_url: str):
-    """Manda un mensaje interactivo al Admin con el botón de Aprobar"""
-    payload = {
-        "phone": ADMIN_WA_NUMBER,
-        "message": f"Nuevo comprobante de pago recibido.\nCliente: {user_phone}\nVer comprobante: {comprobante_url}",
-        "title": "Validación de Acceso",
-        "footer": "Sensory Groove System",
-        "buttons": [
-            {"id": f"aprobar_{transfer_id}", "text": "Validar y Enviar QR"}
-        ]
-    }
-    async with httpx.AsyncClient() as client:
-        await client.post(
-            f"{WPP_URL}/sendButtons",
-            json=payload,
-            headers={"Authorization": f"Bearer {WPP_SECRET}"}
-        )
+    return {"status": "success", "id": new_transfer.id}
 
-# =========================================================
-# ENDPOINTS DE ADMINISTRACIÓN Y WHATSAPP
-# =========================================================
+@app.get("/api/admin/transfers")
+def get_transfers(db: Session = Depends(get_db), authorized: bool = Depends(verify_token)):
+    return db.query(Transfer).order_by(Transfer.status.desc()).all()
+
 @app.post("/api/admin/resolve")
-async def resolve_transfer(req: ResolveTransferRequest):
-    # 1. TODO: Lógica de DB para actualizar status a 'approved'
+async def resolve_transfer(data: dict, db: Session = Depends(get_db), authorized: bool = Depends(verify_token)):
+    transfer = db.query(Transfer).filter(Transfer.id == data["id"]).first()
+    if not transfer:
+        raise HTTPException(status_code=404, detail="Transferencia no encontrada")
     
-    if req.status == 'approved':
-        # 2. TODO: Obtener datos reales del usuario desde la BD usando req.id
-        user_phone = "5210000000000" 
-        user_name = "Usuario Evento"
-        cantidad_accesos = 2
-        
-        # 3. Disparar generación y envío de QR
-        await generar_y_enviar_qr(req.id, user_phone, user_name, cantidad_accesos)
-        
-    return {"status": "success", "message": "Transferencia resuelta y QR enviado."}
+    new_status = data.get("status", data.get("action"))
+    transfer.status = new_status
+    db.commit()
 
-@app.get("/api/admin/whatsapp/status")
-async def get_whatsapp_status():
-    """Consulta a WPPConnect si la sesión está conectada"""
-    async with httpx.AsyncClient() as client:
-        try:
-            res = await client.get(
-                f"{WPP_URL}/check-connection-session",
-                headers={"Authorization": f"Bearer {WPP_SECRET}"}
-            )
-            data = res.json()
-            if data.get("status") == True:
-                return {"connected": True, "phone": "Conectado a Sesión", "lastSeen": "Reciente"}
-            return {"connected": False}
-        except:
-            return {"connected": False}
+    if new_status == 'approved':
+        async with httpx.AsyncClient() as client:
+            headers = await get_wpp_headers(client)
+            await generar_y_enviar_qr(transfer, client, headers)
+            
+    return {"status": "resolved"}
 
+# ---------------------------------------------------------
+# ENDPOINTS DE WPPCONNECT Y WEBHOOK
+# ---------------------------------------------------------
 @app.post("/api/admin/whatsapp/start")
-async def start_whatsapp_session(force: bool = False):
-    """Maneja la desconexión forzada y genera una nueva sesión"""
-    async with httpx.AsyncClient() as client:
+async def start_whatsapp(force: bool = False, authorized: bool = Depends(verify_token)):
+    async with httpx.AsyncClient(timeout=40.0) as client:
         if force:
             try:
-                await client.post(
-                    f"{WPP_URL}/logout-session",
-                    headers={"Authorization": f"Bearer {WPP_SECRET}"}
-                )
+                headers = await get_wpp_headers(client)
+                await client.post(f"{WPP_API_URL}/api/{SESSION_NAME}/logout-session", headers=headers)
             except:
-                pass 
+                pass
                 
         try:
-            await client.post(
-                f"{WPP_URL}/start-session",
-                headers={"Authorization": f"Bearer {WPP_SECRET}"},
-                json={"webhook": "http://backend:8000/api/webhook/wppconnect"}
-            )
-            return {"status": "success", "message": "Sesión iniciada/reiniciada."}
+            headers = await get_wpp_headers(client)
+            payload = {"waitQrCode": True, "webhook": WEBHOOK_URL}
+            res = await client.post(f"{WPP_API_URL}/api/{SESSION_NAME}/start-session", json=payload, headers=headers)
+            data = res.json()
+            
+            return {
+                "status": data.get("status"), 
+                "qrcode": data.get("qrcode"), 
+                "message": data.get("message")
+            }
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=f"Error conectando con WPPConnect: {str(e)}")
 
-# =========================================================
-# WEBHOOK DE WPPCONNECT (ESCUCHA DE EVENTOS Y BOTONES)
-# =========================================================
+@app.get("/api/admin/whatsapp/status")
+async def status_whatsapp(authorized: bool = Depends(verify_token)):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            headers = await get_wpp_headers(client)
+            res = await client.get(f"{WPP_API_URL}/api/{SESSION_NAME}/status-session", headers=headers)
+            data = res.json()
+            return {
+                "connected": data.get("status") == "CONNECTED",
+                "phone": data.get("phone", "Desconocido"),
+                "status": data.get("status")
+            }
+        except Exception as e:
+            return {"connected": False, "status": "DISCONNECTED", "message": "Sin conexión"}
+
 @app.post("/api/webhook/wppconnect")
-async def wppconnect_webhook(request: Request):
+async def wppconnect_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     event = payload.get("event")
     
     if event == "onMessage":
         msg = payload.get("message", {})
         
+        button_id = None
+        # Si el admin responde presionando el botón
         if msg.get("type") == "buttons_response":
             button_id = msg.get("selectedButtonId") 
-            
-            if button_id and button_id.startswith("aprobar_"):
+        # Si el admin responde con la palabra (Fallback por si WA bloquea botones)
+        elif msg.get("type") == "chat" and "aprobar_" in msg.get("body", "").lower():
+            button_id = msg.get("body").lower().strip()
+
+        if button_id and button_id.startswith("aprobar_"):
+            try:
                 transfer_id = int(button_id.split("_")[1])
+            except ValueError:
+                return {"status": "ok"}
+            
+            transfer = db.query(Transfer).filter(Transfer.id == transfer_id).first()
+            if transfer and transfer.status == "pending":
+                transfer.status = "approved"
+                db.commit()
                 
-                # 1. TODO: Lógica de DB para verificar que no esté aprobado ya y cambiar status
-                # 2. TODO: Sacar datos del usuario de la DB
-                user_phone = "5210000000000"
-                user_name = "Usuario BD"
-                accesos = 2
-                
-                # 3. Enviar el QR al usuario
-                await generar_y_enviar_qr(transfer_id, user_phone, user_name, accesos)
-                
-                # 4. Confirmarle al Admin en el mismo chat
-                admin_phone = msg.get("from")
                 async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{WPP_URL}/sendText",
-                        json={"phone": admin_phone, "text": f"✅ Comprobante #{transfer_id} validado. QR enviado al cliente."},
-                        headers={"Authorization": f"Bearer {WPP_SECRET}"}
-                    )
+                    headers = await get_wpp_headers(client)
+                    await generar_y_enviar_qr(transfer, client, headers)
                     
+                    admin_phone = msg.get("from")
+                    confirm_payload = {
+                        "phone": admin_phone,
+                        "message": f"✅ Comprobante #{transfer_id} validado y QR enviado a {transfer.nombre}."
+                    }
+                    await client.post(f"{WPP_API_URL}/api/{SESSION_NAME}/send-message", json=confirm_payload, headers=headers)
+                        
     return {"status": "ok"}

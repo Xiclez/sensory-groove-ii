@@ -16,7 +16,7 @@ services:
       - WPP_SECRET_KEY=sensory_secret_token_123
       - ADMIN_USER=admin
       - ADMIN_PASS=sensory_2026
-      - ADMIN_WA_NUMBER_1=5216141168580
+      - ADMIN_WA_NUMBER_1=5213330547185
       - ADMIN_WA_NUMBER_2=5216143141669
     depends_on:
       - db
