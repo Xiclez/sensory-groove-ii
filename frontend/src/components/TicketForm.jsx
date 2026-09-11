@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { API_BASE_URL } from '../lib/config';
 
 export default function TicketForm() {
   const [formData, setFormData] = useState({ nombre: '', whatsapp: '', accesos: 1, comprobante: null });
@@ -63,7 +64,7 @@ export default function TicketForm() {
     data.append('comprobante', formData.comprobante);
 
     try {
-      const res = await fetch(`https://api-sensory-groove2.fadexlabs.com/api/transfer`, {
+      const res = await fetch(`${API_BASE_URL}/api/transfer`, {
         method: 'POST',
         body: data
       });
