@@ -5,6 +5,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Pillow escribe el nombre y los accesos en el ticket: la imagen slim no trae
+# ninguna fuente TTF y sin esto el texto saldria con la bitmap minima.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

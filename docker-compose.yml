@@ -11,13 +11,20 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/sensorygroove
+      - DATABASE_URL=postgresql+psycopg2://user:password@db:5432/sensorygroove
       - WPP_API_URL=http://wppconnect:21465
       - WPP_SECRET_KEY=sensory_secret_token_123
+      - WPP_SESSION_NAME=sensory_bot
       - ADMIN_USER=admin
       - ADMIN_PASS=sensory_2026
-      - ADMIN_WA_NUMBER_1=5213330547185
-      - ADMIN_WA_NUMBER_2=5216143141669
+      - ADMIN_WA_NUMBER_1=${ADMIN_WA_NUMBER_1:-5213330547185}
+      - ADMIN_WA_NUMBER_2=${ADMIN_WA_NUMBER_2:-5216143141669}
+      # Se incrusta en el enlace "Validar y Enviar QR" que abre el admin desde
+      # su celular, por eso NO puede ser http://backend:8000.
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8000}
+      # Encabeza el ticket con QR; mismo logo que el flyer del frontend.
+      - EVENT_LOGO_URL=${EVENT_LOGO_URL:-https://res.cloudinary.com/dn4m0kr7j/image/upload/v1787165847/SesnoryGrooveII.jpg}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://sensory-groove2.fadexlabs.com}
     depends_on:
       - db
       - wppconnect
@@ -39,6 +46,9 @@ services:
       - "21465:21465"
     environment:
       - SECRET_KEY=sensory_secret_token_123
+      # start-session IGNORA el campo "webhook" del body (solo lee waitQrCode):
+      # la unica forma de registrar el webhook es esta variable de entorno.
+      - WEBHOOK_URL=http://backend:8000/api/webhook/wppconnect
     volumes:
       - wppdata:/home/node/app/tokens
 

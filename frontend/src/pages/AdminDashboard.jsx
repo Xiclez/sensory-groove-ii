@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
+import { API_BASE_URL } from '../lib/config';
 
-const IS_DEV = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_BASE_URL = IS_DEV
-  ? 'http://localhost:8000'
-  : 'https://api-sensory-groove2.fadexlabs.com';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('comprobantes');
@@ -84,11 +81,21 @@ function ViewComprobantes() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: transferAValidar.id, status: 'approved' })
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        alert("Validado y QR enviado.");
-        fetchTransfers();
+        alert(data.status === 'already_approved'
+          ? 'Este comprobante ya estaba validado.'
+          : 'Validado y QR enviado.');
+      } else {
+        // El backend devuelve 502 si WhatsApp rechazo el envio: sin esto el
+        // fallo quedaba invisible y parecia que el QR se habia enviado.
+        alert(`No se pudo validar: ${data.detail || res.status}`);
       }
-    } catch (e) { console.error(e); }
+      fetchTransfers();
+    } catch (e) {
+      console.error(e);
+      alert('Error de conexion con el backend.');
+    }
   };
 
   return (
@@ -100,8 +107,10 @@ function ViewComprobantes() {
           <table className="min-w-full text-white text-sm md:text-base">
             <thead className="bg-black/60 border-b border-white/10">
               <tr>
-                <th className="py-3 md:py-4 px-3 md:px-4 text-left font-semibold">ID</th>
+                <th className="py-3 md:py-4 px-3 md:px-4 text-left font-semibold">Folio</th>
+                <th className="py-3 md:py-4 px-3 md:px-4 text-left font-semibold">Nombre</th>
                 <th className="py-3 md:py-4 px-3 md:px-4 text-left font-semibold">Teléfono</th>
+                <th className="py-3 md:py-4 px-3 md:px-4 text-left font-semibold">Accesos</th>
                 <th className="py-3 md:py-4 px-3 md:px-4 text-left font-semibold">Comprobante</th>
                 <th className="py-3 md:py-4 px-3 md:px-4 text-left font-semibold">Estado</th>
                 <th className="py-3 md:py-4 px-3 md:px-4 text-left font-semibold">Acción</th>
@@ -110,13 +119,15 @@ function ViewComprobantes() {
             <tbody>
               {transfers.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="py-8 text-center text-gray-400">No hay comprobantes pendientes.</td>
+                  <td colSpan="7" className="py-8 text-center text-gray-400">No hay comprobantes pendientes.</td>
                 </tr>
               ) : (
                 transfers.map(t => (
                   <tr key={t.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                    <td className="py-3 px-3 md:px-4">{t.id}</td>
-                    <td className="py-3 px-3 md:px-4">{t.phone}</td>
+                    <td className="py-3 px-3 md:px-4 font-mono text-xs uppercase">{t.folio}</td>
+                    <td className="py-3 px-3 md:px-4">{t.nombre}</td>
+                    <td className="py-3 px-3 md:px-4">{t.whatsapp}</td>
+                    <td className="py-3 px-3 md:px-4">{t.accesos}</td>
                     <td className="py-3 px-3 md:px-4">
                       <a href={`${API_BASE_URL}/${t.comprobante_path}`} target="_blank" rel="noreferrer" className="text-cyan-400 hover:text-cyan-300 underline">
                         Ver Imagen
